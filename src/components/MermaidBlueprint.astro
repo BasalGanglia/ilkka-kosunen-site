@@ -1,0 +1,127 @@
+---
+interface Props { id: string; title: string; diagram: string; }
+const { id, title, diagram } = Astro.props;
+---
+<mermaid-blueprint class="block overflow-hidden rounded-xl border border-slate-200 bg-white">
+  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-3">
+    <span class="text-sm font-medium">{title}</span>
+    <div class="flex flex-wrap items-center gap-2" role="group" aria-label={`${title} diagram controls`}>
+      <button type="button" data-action="out" class="rounded border px-3 py-1" aria-label="Zoom out">−</button>
+      <output data-readout class="min-w-14 text-center text-xs tabular-nums" aria-label="Diagram zoom">100%</output>
+      <button type="button" data-action="in" class="rounded border px-3 py-1" aria-label="Zoom in">+</button>
+      <button type="button" data-action="fit" class="rounded border px-3 py-1 text-sm">Fit</button>
+      <button type="button" data-action="full" class="rounded border px-3 py-1 text-sm" aria-pressed="false">Fullscreen</button>
+    </div>
+  </div>
+  <div data-viewport tabindex="0" role="region" aria-label={`${title}. Arrow keys pan, plus and minus zoom, zero fits.`} class="relative h-96 overflow-hidden bg-slate-50">
+    <div data-canvas class="absolute left-0 top-0 origin-top-left"></div>
+    <p data-status class="absolute left-4 top-4 text-sm text-slate-600" role="status">Loading diagram…</p>
+  </div>
+  <p class="border-t border-slate-200 p-3 text-xs text-slate-600">Drag with a mouse to pan. Ctrl/⌘ + wheel to zoom. Keyboard: arrows, +, −, 0. Touch users can use the buttons; normal page scrolling stays enabled.</p>
+  <details class="border-t border-slate-200 p-3 text-sm">
+    <summary class="cursor-pointer">Diagram source and text alternative</summary>
+    <pre class="mt-3 overflow-x-auto whitespace-pre-wrap text-xs"><code data-source>{diagram}</code></pre>
+  </details>
+</mermaid-blueprint>
+<script>
+  import mermaid from 'mermaid';
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral', flowchart: { htmlLabels: false } });
+  let renderQueue: Promise<unknown> = Promise.resolve();
+  class MermaidBlueprint extends HTMLElement {
+    private cleanup?: () => void;
+    connectedCallback() {
+      renderQueue = renderQueue.then(() => this.mount()).catch(console.error);
+    }
+    disconnectedCallback() { this.cleanup?.(); }
+    private async mount() {
+      if (!this.isConnected || this.cleanup) return;
+      const viewport = this.querySelector<HTMLElement>('[data-viewport]')!;
+      const canvas = this.querySelector<HTMLElement>('[data-canvas]')!;
+      const source = this.querySelector<HTMLElement>('[data-source]')!.textContent || '';
+      const status = this.querySelector<HTMLElement>('[data-status]')!;
+      const readout = this.querySelector<HTMLOutputElement>('[data-readout]')!;
+      const full = this.querySelector<HTMLButtonElement>('[data-action="full"]')!;
+      let svg: SVGSVGElement;
+      try {
+        const result = await mermaid.render(`diagram-${crypto.randomUUID()}`, source);
+        if (!this.isConnected) return;
+        canvas.innerHTML = result.svg;
+        svg = canvas.querySelector('svg')!;
+        status.hidden = true;
+      } catch (error) {
+        status.textContent = 'Diagram unavailable. Expand the source below.';
+        console.error(error);
+        return;
+      }
+      const box = svg.viewBox.baseVal;
+      const width = box.width || 1000, height = box.height || 600;
+      svg.style.width = `${width}px`; svg.style.height = `${height}px`; svg.style.maxWidth = 'none';
+      let scale = 1, x = 0, y = 0, fitScale = 1;
+      const abort = new AbortController();
+      const signal = abort.signal;
+      const paint = () => {
+        canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+        readout.value = `${Math.round(scale / fitScale * 100)}%`;
+      };
+      const fit = () => {
+        fitScale = Math.max(.01, Math.min((viewport.clientWidth - 32) / width, (viewport.clientHeight - 32) / height));
+        scale = fitScale; x = (viewport.clientWidth - width * scale) / 2; y = (viewport.clientHeight - height * scale) / 2; paint();
+      };
+      const zoom = (factor: number, px = viewport.clientWidth / 2, py = viewport.clientHeight / 2) => {
+        const next = Math.min(fitScale * 8, Math.max(fitScale * .5, scale * factor));
+        x = px - (px - x) * next / scale; y = py - (py - y) * next / scale; scale = next; paint();
+      };
+      this.addEventListener('click', async (event) => {
+        const button = (event.target as Element).closest<HTMLButtonElement>('button[data-action]');
+        if (!button) return;
+        switch (button.dataset.action) {
+          case 'in': zoom(1.25); break;
+          case 'out': zoom(.8); break;
+          case 'fit': fit(); break;
+          case 'full':
+            try { if (document.fullscreenElement === this) await document.exitFullscreen(); else await this.requestFullscreen(); }
+            catch { status.hidden = false; status.textContent = 'Fullscreen is unavailable in this browser.'; }
+        }
+      }, { signal });
+      full.disabled = !document.fullscreenEnabled;
+      document.addEventListener('fullscreenchange', () => {
+        const active = document.fullscreenElement === this;
+        full.setAttribute('aria-pressed', String(active));
+        viewport.style.height = active ? 'calc(100dvh - 160px)' : '';
+      }, { signal });
+      viewport.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        const rect = viewport.getBoundingClientRect();
+        zoom(event.deltaY < 0 ? 1.1 : 1 / 1.1, event.clientX - rect.left, event.clientY - rect.top);
+      }, { passive: false, signal });
+      let drag: { id: number; x: number; y: number } | undefined;
+      viewport.addEventListener('pointerdown', (event) => {
+        if (event.pointerType !== 'mouse' || event.button !== 0) return;
+        viewport.focus(); drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        viewport.setPointerCapture(event.pointerId);
+      }, { signal });
+      viewport.addEventListener('pointermove', (event) => {
+        if (!drag || drag.id !== event.pointerId) return;
+        x += event.clientX - drag.x; y += event.clientY - drag.y;
+        drag.x = event.clientX; drag.y = event.clientY; paint();
+      }, { signal });
+      viewport.addEventListener('pointerup', () => { drag = undefined; }, { signal });
+      viewport.addEventListener('pointercancel', () => { drag = undefined; }, { signal });
+      viewport.addEventListener('lostpointercapture', () => { drag = undefined; }, { signal });
+      viewport.addEventListener('keydown', (event) => {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (!['+', '=', '-', '0', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        if (event.key === '+' || event.key === '=') zoom(1.25);
+        else if (event.key === '-') zoom(.8);
+        else if (event.key === '0') fit();
+        else { x += event.key === 'ArrowLeft' ? 30 : event.key === 'ArrowRight' ? -30 : 0; y += event.key === 'ArrowUp' ? 30 : event.key === 'ArrowDown' ? -30 : 0; paint(); }
+      }, { signal });
+      const observer = new ResizeObserver(fit); observer.observe(viewport);
+      this.cleanup = () => { abort.abort(); observer.disconnect(); this.cleanup = undefined; };
+      fit();
+    }
+  }
+  if (!customElements.get('mermaid-blueprint')) customElements.define('mermaid-blueprint', MermaidBlueprint);
+</script>

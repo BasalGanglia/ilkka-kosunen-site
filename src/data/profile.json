@@ -1,0 +1,18 @@
+{
+  "name": "Ilkka Kosunen, PhD",
+  "role": "Principal AI & Knowledge Systems Architect",
+  "headline": "Reliable AI starts with sound systems engineering.",
+  "intro": "I help engineering teams turn complex documents, domain knowledge and AI prototypes into systems they can evaluate, maintain and trust.",
+  "availability": "Planning my transition to independent consulting. Contact me to discuss timing and scope.",
+  "location": "Helsinki, Finland · Hybrid and remote engagements across Europe",
+  "email": "ilkka.kosunen@gmail.com",
+  "github": "https://github.com/BasalGanglia",
+  "cvPath": "",
+  "businessName": "",
+  "businessId": "",
+  "services": [
+    {"title":"Embedded architecture leadership","description":"Hands-on architecture, implementation guidance and technical mentoring for AI and knowledge-intensive systems."},
+    {"title":"Architecture review","description":"A bounded review of retrieval, data modeling, evaluation and operational risks, with prioritized recommendations."},
+    {"title":"Document intelligence pilot","description":"A scoped vertical slice connecting source documents, structured extraction, validation and evidence-backed retrieval."}
+  ]
+}
